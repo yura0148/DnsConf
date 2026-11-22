@@ -36,6 +36,9 @@ public class NextDnsRateLimitedApiProcessor {
                     runRateLimiterResetWaitTimer();
                     requestsUntilRateLimitHitCounter = 0;
                     Log.io("Continue...");
+                } else if (e.getCode() == 400 && ofNullable(e.getReason()).map(r -> r.contains("listLimitExceeded")).orElse(false)) {
+                    Log.fail("\nNextDNS API list limit reached (listLimitExceeded). Stopping further additions.");
+                    break;
                 } else {
                     throw e;
                 }

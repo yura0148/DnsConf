@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,11 +21,13 @@ import static java.util.Objects.nonNull;
 @RequiredArgsConstructor
 public class NextDnsRewriteService {
 
+    public static final int MAX_NEXTDNS_REWRITES = 500;
+
     private final NextDnsRewriteClient nextDnsRewriteClient;
     private final ExcludeRedirectCheckService excludeRedirectCheckService;
 
     public Map<String, CreateRewriteDto> buildNewRewrites(List<BypassRoute> overrides) {
-        Map<String, CreateRewriteDto> rewriteDtos = new HashMap<>();
+        Map<String, CreateRewriteDto> rewriteDtos = new LinkedHashMap<>();
         overrides.forEach(route -> rewriteDtos.putIfAbsent(route.website(), new CreateRewriteDto(route.website(), route.ip())));
         return rewriteDtos;
     }
@@ -61,7 +63,17 @@ public class NextDnsRewriteService {
             Log.io("Removing %s excluded rewrites from NextDNS".formatted(ignoredIds.size()));
             NextDnsRateLimitedApiProcessor.callApi(ignoredIds, nextDnsRewriteClient::deleteRewriteById);
         }
-        return List.copyOf(newRewriteRequests.values());
+
+        int remainingExistingCount = existingRewrites.size() - outdatedIds.size() - ignoredIds.size();
+        int availableSlots = Math.max(0, MAX_NEXTDNS_REWRITES - remainingExistingCount);
+
+        List<CreateRewriteDto> result = new ArrayList<>(newRewriteRequests.values());
+        if (result.size() > availableSlots) {
+            Log.fail("NextDNS supports at most %d rewrites per profile. Currently retained: %d, available slots: %d. Truncating %d new rewrites to %d to prevent listLimitExceeded error."
+                    .formatted(MAX_NEXTDNS_REWRITES, remainingExistingCount, availableSlots, result.size(), availableSlots));
+            return List.copyOf(result.subList(0, availableSlots));
+        }
+        return List.copyOf(result);
     }
 
     public List<RewriteDto> getExistingRewrites() {
